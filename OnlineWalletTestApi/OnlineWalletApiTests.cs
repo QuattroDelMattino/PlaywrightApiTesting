@@ -35,8 +35,98 @@ public class OnlineWalletApiTests : PlaywrightTest
         var response = await Request.GetAsync("/onlinewallet/balancee");
         Assert.AreEqual(404, response.Status);
         Assert.AreEqual("Not Found", response.StatusText);
+    } 
+    
+    [TestMethod]
+    public async Task Test_WalletDeposit_OkStatus()
+    {
+        var data = new Dictionary<string, double>
+        {
+            { "amount", 3 }
+        };
+        
+        var depositResponse = await Request.PostAsync("/onlinewallet/deposit", new() { DataObject = data });
+        await Assertions.Expect(depositResponse).ToBeOKAsync();
+
+        JsonElement? res = await depositResponse.JsonAsync();
+        var amountValue = res?.GetProperty("amount");
+        Assert.AreEqual(3, amountValue?.GetDouble()!);
+        Assert.AreEqual(3, await GetAmountValue());
     }
     
+    [TestMethod]
+    public async Task Test_WalletDeposit_String()
+    {
+        var data = new Dictionary<string, string>
+        {
+            { "amount", "3" }
+        };
+        
+        var depositResponse = await Request.PostAsync("/onlinewallet/deposit", new() { DataObject = data });
+        await Assertions.Expect(depositResponse).ToBeOKAsync();
+
+        JsonElement? res = await depositResponse.JsonAsync();
+        var amountValue = res?.GetProperty("amount");
+        Assert.AreEqual(3, amountValue?.GetDouble()!);
+        Assert.AreEqual(3, await GetAmountValue());
+    }
+    
+    [TestMethod]
+    public async Task Test_WalletDeposit_InvalidAmount_ExpectBadRequest()
+    {
+        var data = new Dictionary<string, string>
+        {
+            { "amount", "99999999999999999999999999999" }
+        };
+        
+        var depositResponse = await Request.PostAsync("/onlinewallet/deposit", new() { DataObject = data });
+        Assert.AreEqual(400, depositResponse.Status);
+        Assert.AreEqual("Bad Request", depositResponse.StatusText);
+        JsonElement? jsonBody = await depositResponse.JsonAsync();
+        var errors = jsonBody?.GetProperty("errors");
+        var depositRequest = errors?.GetProperty("depositRequest").EnumerateArray();
+        Assert.AreEqual("The depositRequest field is required.", depositRequest?.First().GetString());
+        
+        var amount = errors?.GetProperty("$.amount").EnumerateArray();
+        // Assert.AreEqual("The JSON value could not be converted to System.Decimal", amount?.First().GetString());
+        Assert.IsTrue(amount?.First().GetString().Contains("The JSON value could not be converted to System.Decimal"));
+    }
+    
+    [TestMethod]
+    public async Task Test_WalletDeposit_NegativeAmount_ExpectBadRequest()
+    {
+        var data = new Dictionary<string, string>
+        {
+            { "amount", "-5" }
+        };
+        
+        var depositResponse = await Request.PostAsync("/onlinewallet/deposit", new() { DataObject = data });
+        Assert.AreEqual(400, depositResponse.Status);
+        Assert.AreEqual("Bad Request", depositResponse.StatusText);
+        JsonElement? jsonBody = await depositResponse.JsonAsync();
+        var errors = jsonBody?.GetProperty("errors").GetProperty("Amount").EnumerateArray();
+        Assert.AreEqual("'Amount' must be greater than or equal to '0'.", errors?.First().GetString());
+    }
+    
+    /*
+     * Expected here would be to fail
+     */
+    [TestMethod]
+    public async Task Test_WalletDeposit_EmptyPayload_ExpectBalanceNotChanged()
+    {
+        var data = new Dictionary<string, string>();
+        var depositResponse = await Request.PostAsync("/onlinewallet/deposit", new() { DataObject = data });
+        await CheckBalanceIsZero(depositResponse);
+    }
+
+    [TestMethod]
+    public async Task Test_WalletDeposit_NoPayload_ExpectUnsupportedMediaType()
+    {
+        var depositResponse = await Request.PostAsync("/onlinewallet/deposit", new() { DataObject = null });
+        Assert.AreEqual(415, depositResponse.Status);
+        Assert.AreEqual("Unsupported Media Type", depositResponse.StatusText);
+    }
+
     private async Task ResetApiState()
     {
         var currentBalance = await GetAmountValue();
@@ -86,6 +176,6 @@ public class OnlineWalletApiTests : PlaywrightTest
 
         JsonElement? jsonBody = await response.JsonAsync();
         var amountValue = jsonBody?.GetProperty("amount");
-        return amountValue?.GetDouble() ?? throw new Exception("Get response amount cannot be null");
+        return amountValue?.GetDouble() ?? throw new Exception("Get response amount should not be null");
     }
 }
